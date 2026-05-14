@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>论文阅读管理平台</title>
+<link rel="stylesheet" href="/static/style.css?v=18">
+</head>
+<body>
+
+<div class="modal" id="settings-modal">
+  <div class="modal-content">
+    <h3>API 设置</h3>
+    <label>API Key</label>
+    <input type="password" id="api-key-input" placeholder="sk-...">
+    <label>Base URL</label>
+    <input type="text" id="api-base-input" value="https://api.deepseek.com">
+    <label>推理模型</label>
+    <select id="model-select">
+      <option value="deepseek-chat">DeepSeek-V3 (deepseek-chat)</option>
+      <option value="deepseek-reasoner">DeepSeek-R1 (deepseek-reasoner)</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('settings-modal')">取消</button>
+      <button class="btn btn-outline" id="test-btn" onclick="testConnection()">测试连接</button>
+      <button class="btn btn-primary" onclick="saveConfig()">保存</button>
+    </div>
+    <div id="test-result" style="margin-top:10px;font-size:12px;display:none;"></div>
+  </div>
+</div>
+
+<div class="modal" id="upload-modal">
+  <div class="modal-content">
+    <h3>上传论文</h3>
+    <div class="drop-zone" id="drop-zone">
+      <p>拖拽文件到此处或点击选择</p>
+      <p class="hint">支持 PDF / Word (.pdf, .docx, .doc)</p>
+      <input type="file" id="file-input" accept=".pdf,.docx,.doc" hidden>
+    </div>
+    <div class="upload-progress" id="upload-progress" style="display:none">
+      <div class="spinner"></div>
+      <span>正在解析论文...</span>
+    </div>
+    <div class="upload-error" id="upload-error" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('upload-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="app-container">
+  <header class="header">
+    <h1>论文阅读管理平台</h1>
+    <div class="header-actions">
+      <span id="user-badge" style="font-size:12px;color:#64748b;">加载中...</span>
+      <span id="model-badge" class="model-badge">加载中...</span>
+      <button class="btn btn-outline" onclick="openSettings()">API 设置</button>
+      <button class="btn btn-primary" onclick="openUpload()">上传论文</button>
+      <button class="btn btn-outline" onclick="logout()" style="color:#ef4444;border-color:#fecaca;">退出</button>
+    </div>
+  </header>
+
+  <div class="main-content" id="main-content">
+    <aside class="panel panel-left" id="panel-left">
+      <div class="panel-header">
+        <h2>论文列表</h2>
+        <input type="text" id="search-input" class="search-input" placeholder="搜索论文..." oninput="searchPapers()">
+      </div>
+      <div class="paper-list" id="paper-list">
+        <p class="empty-hint">暂无论文，点击右上角上传</p>
+      </div>
+    </aside>
+
+    <div class="resize-handle" id="handle-left"></div>
+
+    <section class="panel panel-center" id="panel-center">
+      <div class="panel-header">
+        <h2 id="paper-title-display" onclick="editTitle()" style="cursor:pointer;">论文详情</h2>
+        <input class="title-input-inline" id="paper-title-input" placeholder="论文标题" style="display:none;" onkeydown="if(event.key==='Enter'){event.preventDefault();renamePaper();}" onblur="renamePaper()">
+        <span class="paper-meta" id="paper-meta"></span>
+        <div class="header-actions" id="paper-actions" style="display:none;">
+          <button class="btn btn-sm" onclick="renamePaper()">重命名</button>
+          <button class="btn btn-sm" onclick="downloadPaper()">下载</button>
+          <button class="btn btn-sm" id="share-btn" onclick="sharePaper()">分享</button>
+          <span id="share-url" style="font-size:11px;color:#2563eb;display:none;"></span>
+        </div>
+      </div>
+      <div class="view-tabs" id="view-tabs" style="display:none;">
+        <button class="tab-btn active" id="tab-pdf" onclick="switchTab('pdf')">PDF 原版</button>
+        <button class="tab-btn" id="tab-notes" onclick="switchTab('notes')">笔记</button>
+      </div>
+      <div class="paper-detail" id="paper-detail">
+        <p class="empty-hint">选择左侧论文查看详情</p>
+      </div>
+    </section>
+
+    <div class="resize-handle" id="handle-right"></div>
+
+    <aside class="panel panel-right" id="panel-right">
+      <div class="panel-header">
+        <h2>AI 问答</h2>
+        <button class="btn btn-sm btn-outline" onclick="toggleAiPanel()" id="expand-btn" title="展开/折叠AI面板" style="font-weight:600;">展开</button>
+      </div>
+      <div class="qa-container">
+        <div class="chat-input">
+          <input type="text" id="question-input" placeholder="输入问题，按 Enter 发送...">
+          <button class="btn btn-primary" id="btn-send" onclick="handleSend()">发 送</button>
+        </div>
+        <div class="chat-history" id="chat-history">
+          <p class="empty-hint">直接提问或选中论文后结合论文提问</p>
+        </div>
+        <div id="debug-info" style="font-size:11px;color:#999;margin-top:4px;"></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+// === Resize (optimized with rAF) ===
+(function() {
+  var left = document.getElementById('panel-left');
+  var right = document.getElementById('panel-right');
+  var hLeft = document.getElementById('handle-left');
+  var hRight = document.getElementById('handle-right');
+  var dragging = null;
+  var startX, startW;
+  var pendingW = null;
+  var rafId = null;
+
+  function applyResize() {
+    if (pendingW !== null && dragging) {
+      dragging.setWidth(pendingW);
+      pendingW = null;
+    }
+    rafId = null;
+  }
+
+  function onDown(e, handle, getPanel, setWidth) {
+    dragging = { handle: handle, setWidth: setWidth };
+    startX = e.touches ? e.touches[0].clientX : e.clientX;
+    startW = getPanel().getBoundingClientRect().width;
+    handle.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
+
+  function onMove(clientX) {
+    if (!dragging) return;
+    var dx = clientX - startX;
+    if (dragging.handle === hLeft) {
+      pendingW = Math.max(200, Math.min(500, startW + dx));
+    } else {
+      pendingW = Math.max(300, Math.min(900, startW - dx));
+    }
+    if (!rafId) rafId = requestAnimationFrame(applyResize);
+  }
+
+  function stopDrag() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (pendingW !== null && dragging) { dragging.setWidth(pendingW); pendingW = null; }
+    if (dragging) {
+      dragging.handle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      dragging = null;
+    }
+  }
+
+  hLeft.addEventListener('mousedown', function(e) { onDown(e, hLeft, function(){return left;}, function(w){left.style.width=w+'px';}); e.preventDefault(); });
+  hLeft.addEventListener('touchstart', function(e) { onDown(e, hLeft, function(){return left;}, function(w){left.style.width=w+'px';}); });
+  hRight.addEventListener('mousedown', function(e) { onDown(e, hRight, function(){return right;}, function(w){right.style.width=w+'px';}); e.preventDefault(); });
+  hRight.addEventListener('touchstart', function(e) { onDown(e, hRight, function(){return right;}, function(w){right.style.width=w+'px';}); });
+  document.addEventListener('mousemove', function(e) { onMove(e.clientX); });
+  document.addEventListener('touchmove', function(e) { onMove(e.touches[0].clientX); });
+  document.addEventListener('mouseup', stopDrag);
+  document.addEventListener('touchend', stopDrag);
+})();
+
+// === Core send ===
+window.__currentPaperId = null;
+window.__currentView = 'pdf';
+
+function toggleAiPanel() {
+  var panel = document.getElementById('panel-right');
+  var btn = document.getElementById('expand-btn');
+  if (panel.classList.contains('expanded')) {
+    panel.classList.remove('expanded');
+    btn.textContent = '展开';
+  } else {
+    panel.classList.add('expanded');
+    btn.textContent = '折叠';
+  }
+}
+
+function debug(msg) {
+  var el = document.getElementById('debug-info');
+  if (el) el.textContent = '[debug] ' + msg;
+  console.log('[debug]', msg);
+}
+
+function handleSend() {
+  debug('handleSend called');
+  var input = document.getElementById('question-input');
+  if (!input) { debug('ERROR: input not found'); return; }
+  var question = input.value.trim();
+  if (!question) { debug('empty question'); return; }
+
+  input.value = '';
+  input.focus();
+  addChatBubble('question', question);
+  var loadingId = addLoadingBubble();
+
+  var url, body;
+  if (window.__currentPaperId) {
+    url = '/api/papers/' + window.__currentPaperId + '/ask';
+  } else {
+    url = '/api/ask';
+  }
+  body = JSON.stringify({ question: question, research_direction: '' });
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    removeLoadingBubble(loadingId);
+    addChatBubble('answer', data.answer);
+    debug('answer length=' + (data.answer ? data.answer.length : 0));
+  })
+  .catch(function(e) {
+    removeLoadingBubble(loadingId);
+    addChatBubble('answer', '请求失败: ' + e.message);
+    debug('ERROR: ' + e.message);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  var input = document.getElementById('question-input');
+  if (input) {
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.isComposing) {
+        e.preventDefault();
+        handleSend();
+      }
+    });
+  }
+  loadModelBadge();
+  loadUserInfo();
+});
+
+// Chat bubbles
+function addChatBubble(type, text) {
+  var history = document.getElementById('chat-history');
+  if (!history) return;
+  var hint = history.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  var div = document.createElement('div');
+  div.className = 'chat-bubble ' + type;
+  var label = type === 'question' ? '你' : 'AI 助手';
+  div.innerHTML = '<div class="role">' + label + '</div><div>' + formatChatText(text) + '</div>';
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+}
+function addLoadingBubble() {
+  var history = document.getElementById('chat-history');
+  if (!history) return '';
+  var hint = history.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  var id = 'loading-' + Date.now();
+  var div = document.createElement('div');
+  div.id = id;
+  div.className = 'chat-bubble answer';
+  div.innerHTML = '<div class="role">AI 助手</div><div>思考中...</div>';
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+  return id;
+}
+function removeLoadingBubble(id) {
+  var el = document.getElementById(id);
+  if (el) el.remove();
+}
+function formatChatText(text) {
+  if (!text) return '';
+  var div = document.createElement('div');
+  div.textContent = text;
+  var safe = div.innerHTML;
+  return safe
+    .split('\n\n').join('</p><p>')
+    .split('\n').join('<br>')
+    .replace(/^/, '<p>').replace(/$/, '</p>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+// Settings
+function openSettings() {
+  fetch('/api/config')
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      document.getElementById('api-key-input').value = cfg.has_api_key ? '(已设置)' : '';
+      document.getElementById('api-base-input').value = cfg.base_url || 'https://api.deepseek.com';
+      document.getElementById('model-select').value = cfg.model || 'deepseek-chat';
+      document.getElementById('settings-modal').classList.add('show');
+    });
+}
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function saveConfig() {
+  var apiKey = document.getElementById('api-key-input').value.trim();
+  var baseUrl = document.getElementById('api-base-input').value.trim();
+  var model = document.getElementById('model-select').value;
+  var body = { api_key: (apiKey === '(已设置)' ? '' : apiKey), base_url: baseUrl, model: model };
+  fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function() { loadModelBadge(); });
+  closeModal('settings-modal');
+  alert('设置已保存');
+}
+function testConnection() {
+  var btn = document.getElementById('test-btn');
+  var result = document.getElementById('test-result');
+  btn.disabled = true; btn.textContent = '测试中...';
+  result.style.display = 'block'; result.style.color = '#64748b'; result.textContent = '正在连接...';
+  fetch('/api/model-info')
+    .then(function(r) { return r.json(); })
+    .then(function(info) {
+      btn.disabled = false; btn.textContent = '测试连接';
+      if (info.status === 'connected') {
+        result.style.color = '#166534'; result.style.background = '#f0fdf4';
+        result.style.padding = '8px 12px'; result.style.borderRadius = '6px';
+        result.textContent = '已连接 - 模型: ' + (info.response_model || info.model) +
+          ' | tokens: ' + (info.usage ? info.usage.prompt_tokens + info.usage.completion_tokens : 'N/A');
+      } else if (info.status === 'no_key') {
+        result.style.color = '#92400e'; result.style.background = '#fefce8';
+        result.style.padding = '8px 12px'; result.style.borderRadius = '6px';
+        result.textContent = '未配置 API Key';
+      } else {
+        result.style.color = '#991b1b'; result.style.background = '#fef2f2';
+        result.style.padding = '8px 12px'; result.style.borderRadius = '6px';
+        result.textContent = (info.error || '连接失败');
+      }
+    }).catch(function(e) {
+      btn.disabled = false; btn.textContent = '测试连接';
+      result.style.color = '#991b1b'; result.style.background = '#fef2f2';
+      result.style.padding = '8px 12px'; result.style.borderRadius = '6px';
+      result.textContent = e.message;
+    });
+}
+function loadUserInfo() {
+  fetch('/api/auth/me')
+    .then(function(r) { return r.json(); })
+    .then(function(u) {
+      var badge = document.getElementById('user-badge');
+      if (badge && u.logged_in) {
+        badge.textContent = '用户: ' + u.username;
+      }
+    });
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
+async function sharePaper() {
+  if (!window.__currentPaperId) return;
+  var res = await fetch('/api/papers/' + window.__currentPaperId + '/share', { method: 'POST' });
+  var data = await res.json();
+  var span = document.getElementById('share-url');
+  var btn = document.getElementById('share-btn');
+  if (data.shared) {
+    var fullUrl = window.location.origin + data.url;
+    span.textContent = fullUrl;
+    span.style.display = '';
+    btn.textContent = '取消分享';
+    // Copy to clipboard
+    try { await navigator.clipboard.writeText(fullUrl); } catch(e) {}
+  } else {
+    span.textContent = '';
+    span.style.display = 'none';
+    btn.textContent = '分享';
+  }
+}
+
+function loadModelBadge() {
+  fetch('/api/config')
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      var badge = document.getElementById('model-badge');
+      if (badge) {
+        badge.textContent = cfg.has_api_key ? (cfg.model || 'deepseek-chat') : '未配置';
+        badge.style.background = cfg.has_api_key ? '#f0fdf4' : '#fef2f2';
+        badge.style.color = cfg.has_api_key ? '#166534' : '#991b1b';
+        badge.style.borderColor = cfg.has_api_key ? '#bbf7d0' : '#fecaca';
+      }
+    });
+}
+</script>
+
+<script src="/static/script.js?v=16"></script>
+</body>
+</html>

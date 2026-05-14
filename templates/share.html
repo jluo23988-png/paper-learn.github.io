@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ paper.title or paper.filename }} - 论文分享</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; }
+header { background:#fff; padding:14px 24px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+header h1 { font-size:16px; }
+header .badge { font-size:11px; padding:3px 10px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:999px; }
+.main { max-width:960px; margin:24px auto; padding:0 16px; }
+.card { background:#fff; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.06); overflow:hidden; }
+.card .head { padding:16px 20px; border-bottom:1px solid #e2e8f0; }
+.card .head h2 { font-size:17px; margin-bottom:4px; }
+.card .head .meta { font-size:12px; color:#64748b; }
+embed { width:100%; height:80vh; border:none; }
+.empty { text-align:center; padding:40px; color:#64748b; }
+</style>
+</head>
+<body>
+<header>
+  <h1>论文阅读管理平台</h1>
+  <span class="badge">公开分享</span>
+</header>
+<div class="main">
+  <div class="card">
+    <div class="head">
+      <h2>{{ paper.title or paper.filename }}</h2>
+      <p class="meta">{{ paper.page_count }}页 · 上传于 {{ paper.created_at }}</p>
+    </div>
+    {% if paper.filename.lower().endswith('.pdf') %}
+    <embed src="/api/shared-file/{{ paper.share_token }}" type="application/pdf">
+    {% else %}
+    <div class="empty">
+      <p>Word 文档暂不支持在线预览</p>
+      <p style="margin-top:8px;font-size:13px;">文件: {{ paper.filename }}</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "deepseek_api_key": "sk-your-api-key-here",
+  "deepseek_base_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "secret_key": "auto-generated"
+}

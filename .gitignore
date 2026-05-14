@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+uploads/
+data/
+config.json
+.env
+*.db
+.vercel
+node_modules/
+.claude/
+paper1.json
+*.exe
