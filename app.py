@@ -3,6 +3,9 @@ import json
 import sqlite3
 import uuid
 import secrets
+import subprocess
+import hmac
+import hashlib
 from datetime import datetime
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, g, send_file, session, redirect, url_for
@@ -302,6 +305,32 @@ def api_me():
 @login_required
 def index():
     return render_template('index.html')
+
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """GitHub webhook: auto git pull on push"""
+    signature = request.headers.get('X-Hub-Signature-256', '')
+    secret = os.environ.get('WEBHOOK_SECRET', 'paper-auto-deploy').encode()
+
+    body = request.get_data()
+    expected = 'sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(signature, expected):
+        return jsonify({'error': 'invalid signature'}), 403
+
+    try:
+        result = subprocess.run(
+            ['git', '-C', BASE_DIR, 'pull'],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            'ok': True,
+            'output': result.stdout.strip(),
+            'note': 'Server process must be restarted to apply changes'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ==================== Share Route (no login needed) ====================
