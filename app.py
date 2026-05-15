@@ -49,9 +49,8 @@ def save_config(data):
 
 
 # Persistent secret key
-_cfg = load_config()
-_secret = _cfg.get('secret_key', '') or secrets.token_hex(32)
-if not _cfg.get('secret_key'):
+_secret = os.environ.get('SECRET_KEY', '') or load_config().get('secret_key', '') or secrets.token_hex(32)
+if not os.environ.get('SECRET_KEY') and not load_config().get('secret_key'):
     save_config({'secret_key': _secret})
 app.secret_key = _secret
 
