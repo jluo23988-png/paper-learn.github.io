@@ -15,50 +15,43 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-IS_VERCEL = os.environ.get('VERCEL') == '1'
-
-if IS_VERCEL:
-    CONFIG_FILE = os.path.join('/tmp', 'config.json')
-    DB_FILE = os.path.join('/tmp', 'papers.db')
-    UPLOAD_DIR = os.path.join('/tmp', 'uploads')
-else:
-    CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
-    DB_FILE = os.path.join(BASE_DIR, 'data', 'papers.db')
-    UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
+CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
+DB_FILE = os.path.join(BASE_DIR, 'data', 'papers.db')
+UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 
 os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def load_config():
-    if IS_VERCEL:
-        return {
-            'deepseek_api_key': os.environ.get('DEEPSEEK_API_KEY', ''),
-            'deepseek_base_url': os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com'),
-            'model': os.environ.get('DEEPSEEK_MODEL', 'deepseek-chat'),
-            'secret_key': os.environ.get('SECRET_KEY', secrets.token_hex(32)),
-        }
+    # Environment variables override file config (for cloud deployment)
+    config = {}
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            config = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        pass
+    # Env vars take priority
+    if os.environ.get('DEEPSEEK_API_KEY'):
+        config['deepseek_api_key'] = os.environ['DEEPSEEK_API_KEY']
+    if os.environ.get('DEEPSEEK_BASE_URL'):
+        config['deepseek_base_url'] = os.environ['DEEPSEEK_BASE_URL']
+    if os.environ.get('DEEPSEEK_MODEL'):
+        config['model'] = os.environ['DEEPSEEK_MODEL']
+    return config
 
 
 def save_config(data):
-    if IS_VERCEL:
-        return  # Can't persist config on Vercel
     config = load_config()
     config.update(data)
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
-# Persistent secret key (generate once, keep across restarts)
+# Persistent secret key
 _cfg = load_config()
-_secret = _cfg.get('secret_key', '')
-if not _secret:
-    _secret = secrets.token_hex(32)
+_secret = _cfg.get('secret_key', '') or secrets.token_hex(32)
+if not _cfg.get('secret_key'):
     save_config({'secret_key': _secret})
 app.secret_key = _secret
 
